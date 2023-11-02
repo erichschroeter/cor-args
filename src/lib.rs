@@ -30,6 +30,21 @@ pub trait Handler {
 ///
 /// This struct contains a single `value` that will be returned for any request,
 /// regardless of the provided key.
+///
+/// # Examples
+///
+/// ```
+/// use cor_args::{DefaultHandler, Handler};
+///
+/// // Create a new DefaultHandler for a specific value
+/// let handler = DefaultHandler::new("some_value");
+///
+/// // Add a fallback handler
+/// //let handler = handler.next(some_other_handler.into());
+///
+/// // Handle a configuration request
+/// let value = handler.handle_request("some_key");
+/// ```
 pub struct DefaultHandler {
     value: String,
 }
@@ -40,6 +55,14 @@ impl DefaultHandler {
     /// # Arguments
     ///
     /// * `value` - The value to be returned for any request.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cor_args::DefaultHandler;
+    ///
+    /// let handler = DefaultHandler::new("some_value");
+    /// ```
     #[allow(dead_code)]
     pub fn new(value: &str) -> Self {
         DefaultHandler {
@@ -69,6 +92,26 @@ impl Into<Box<dyn Handler>> for DefaultHandler {
 /// This struct is responsible for handling command-line arguments passed to the application.
 /// If a value for a given key is not found in the arguments, it delegates the request to the
 /// next handler (if provided).
+///
+/// # Examples
+///
+/// ```
+/// use cor_args::{ArgHandler, Handler};
+///
+/// // Create a simple `clap` command
+/// let args = clap::Command::new("myapp")
+///     .arg(clap::Arg::new("example").long("example"))
+///     .get_matches();
+///
+/// // Create a new ArgHandler for a `clap::ArgMatches`
+/// let handler = ArgHandler::new(&args);
+///
+/// // Add a fallback handler
+/// //let handler = handler.next(some_other_handler.into());
+///
+/// // Handle a configuration request matching the `clap::Arg` name
+/// let value = handler.handle_request("example");
+/// ```
 pub struct ArgHandler<'a> {
     /// Parsed command-line arguments.
     args: &'a ArgMatches,
@@ -77,12 +120,23 @@ pub struct ArgHandler<'a> {
 }
 
 impl<'a> ArgHandler<'a> {
-    /// Creates a new `ArgHandler` with the specified arguments and an optional next handler.
+    /// Creates a new `ArgHandler` with the specified arguments.
     ///
     /// # Arguments
     ///
     /// * `args` - The parsed command-line arguments.
-    /// * `next` - An optional next handler to which requests can be delegated if this handler can't fulfill them.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cor_args::ArgHandler;
+    ///
+    /// let args = clap::Command::new("myapp")
+    ///     .arg(clap::Arg::new("config").long("some-option"))
+    ///     .get_matches();
+    ///
+    /// let handler = ArgHandler::new(&args);
+    /// ```
     #[allow(dead_code)]
     pub fn new(args: &'a ArgMatches) -> Self {
         ArgHandler { args, next: None }
@@ -105,6 +159,10 @@ impl<'a> Handler for ArgHandler<'a> {
     /// # Arguments
     ///
     /// * `key` - The key for which the value needs to be retrieved.
+    ///
+    /// # Returns
+    ///
+    /// An `Option` containing the value associated with the key, or `None` if the key is not found.
     fn handle_request(&self, key: &str) -> Option<String> {
         if let Ok(value) = self.args.try_get_one::<String>(key) {
             if let Some(value) = value {
@@ -129,6 +187,21 @@ impl<'a> Into<Box<dyn Handler + 'a>> for ArgHandler<'a> {
 /// This struct is responsible for handling requests by checking for the existence of
 /// an environment variable corresponding to the provided key. If the environment variable
 /// is not found, it delegates the request to the next handler (if provided).
+///
+/// # Examples
+///
+/// ```
+/// use cor_args::{EnvHandler, Handler};
+///
+/// // Create a new EnvHandler specifying a prefix for environment variables
+/// let handler = EnvHandler::new().prefix("MYAPP_");
+///
+/// // Add a fallback handler
+/// //let handler = handler.next(some_other_handler.into());
+///
+/// // Handle a configuration request matching `MYAPP_some_key`
+/// let value = handler.handle_request("some_key");
+/// ```
 pub struct EnvHandler<'a> {
     /// A prefix to prepend to the key passed to `handle_request()`.
     prefix: Option<Cow<'a, str>>,
@@ -137,12 +210,19 @@ pub struct EnvHandler<'a> {
 }
 
 impl<'a> EnvHandler<'a> {
-    /// Creates a new `EnvHandler` with an optional next handler.
+    /// Creates a new `EnvHandler`.
     ///
     /// # Arguments
     ///
     /// * `prefix` - An optional prefix to which requests will prepend when `handle_request()` is executed.` If `None`, an empty string is assigned.
-    /// * `next` - An optional next handler to which requests can be delegated if this handler can't fulfill them.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cor_args::EnvHandler;
+    ///
+    /// let handler = EnvHandler::new();
+    /// ```
     #[allow(dead_code)]
     pub fn new() -> Self {
         EnvHandler {
@@ -177,6 +257,10 @@ impl<'a> Handler for EnvHandler<'a> {
     /// # Arguments
     ///
     /// * `key` - The key for which the value needs to be retrieved from environment variables.
+    ///
+    /// # Returns
+    ///
+    /// An `Option` containing the value associated with the key, or `None` if the key is not found.
     fn handle_request(&self, key: &str) -> Option<String> {
         if let Some(prefix) = &self.prefix {
             let key = format!("{prefix}{key}");
@@ -204,7 +288,21 @@ impl<'a> Into<Box<dyn Handler + 'a>> for EnvHandler<'a> {
 /// A handler for retrieving values from a file.
 ///
 /// This struct is responsible for handling requests by checking for values within a specified file.
-/// (The actual file reading logic is not yet implemented in the provided code.)
+///
+/// # Examples
+///
+/// ```
+/// use cor_args::{FileHandler, Handler};
+///
+/// // Create a new FileHandler specifying a path to a file.
+/// let handler = FileHandler::new("/path/to/file");
+///
+/// // Add a fallback handler
+/// //let handler = handler.next(some_other_handler.into());
+///
+/// // Handle a configuration request returning contents of `/path/to/file`
+/// let value = handler.handle_request("");
+/// ```
 pub struct FileHandler {
     /// Path to the file from which values are to be retrieved.
     file_path: PathBuf,
@@ -213,12 +311,19 @@ pub struct FileHandler {
 }
 
 impl FileHandler {
-    /// Creates a new `FileHandler` with the specified file path and an optional next handler.
+    /// Creates a new `FileHandler` with the specified file path.
     ///
     /// # Arguments
     ///
     /// * `file_path` - The path to the file from which values are to be retrieved.
-    /// * `next` - An optional next handler to which requests can be delegated if this handler can't fulfill them.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cor_args::FileHandler;
+    ///
+    /// let handler = FileHandler::new("/path/to/file");
+    /// ```
     #[allow(dead_code)]
     pub fn new<P>(file_path: P) -> Self
     where
@@ -247,7 +352,11 @@ impl Handler for FileHandler {
     ///
     /// # Arguments
     ///
-    /// * `key` - The key for which the value needs to be retrieved. (Note: The `key` is currently unused in the reading logic.)
+    /// * `key` - The key for which the value needs to be retrieved. (Note: The `key` is currently not used directly, just passed on to the next handler.)
+    ///
+    /// # Returns
+    ///
+    /// An `Option` containing the contents of the file, or `None` if the key is not found.
     fn handle_request(&self, key: &str) -> Option<String> {
         if let Ok(mut file) = File::open(&self.file_path) {
             let mut content = String::new();
@@ -274,18 +383,38 @@ impl Into<Box<dyn Handler>> for FileHandler {
 /// specified in the underlying `FileHandler`, and then searching for a specific key
 /// within the parsed JSON structure. If the key is not found in the JSON structure,
 /// it delegates the request to the next handler (if provided).
+///
+/// ```
+/// use cor_args::{JSONFileHandler, Handler};
+///
+/// // Create a new JSONFileHandler specifying a path to a file.
+/// let handler = JSONFileHandler::new("file.json");
+///
+/// // Add a fallback handler
+/// //let handler = handler.next(some_other_handler.into());
+///
+/// // Handle a configuration request matching a `"some_key"` within `file.json`
+/// let value = handler.handle_request("some_key");
+/// ```
 pub struct JSONFileHandler {
     /// Underlying file handler used to read content from the specified file.
     file_handler: FileHandler,
 }
 
 impl JSONFileHandler {
-    /// Creates a new `JSONFileHandler` with the specified file path and an optional next handler.
+    /// Creates a new `JSONFileHandler` with the specified file path.
     ///
     /// # Arguments
     ///
     /// * `file_path` - The path to the JSON file from which values are to be retrieved.
-    /// * `next` - An optional next handler to which requests can be delegated if this handler can't fulfill them.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cor_args::FileHandler;
+    ///
+    /// let handler = FileHandler::new("file.json");
+    /// ```
     #[allow(dead_code)]
     pub fn new<P>(file_path: P) -> Self
     where
@@ -355,6 +484,10 @@ impl Handler for JSONFileHandler {
     /// # Arguments
     ///
     /// * `key` - The key for which the value needs to be retrieved from the JSON file.
+    ///
+    /// # Returns
+    ///
+    /// An `Option` containing the value associated with the key, or `None` if the key is not found.
     fn handle_request(&self, key: &str) -> Option<String> {
         if let Some(file_data) = self.file_handler.handle_request(key) {
             if let Ok(parsed_json) = serde_json::from_str::<Value>(&file_data) {
@@ -377,12 +510,48 @@ impl Into<Box<dyn Handler>> for JSONFileHandler {
     }
 }
 
+/// A configuration file handler for reading key-value pairs from a file.
+///
+/// The `CfgFileHandler` is used to read configuration data from a file and provide it
+/// as key-value pairs. It supports chaining multiple handlers for fallback behavior.
+///
+/// # Examples
+///
+/// ```
+/// use cor_args::{CfgFileHandler, Handler};
+///
+/// // Create a new CfgFileHandler for a specific file path
+/// let handler = CfgFileHandler::new("config.toml");
+///
+/// // Add a fallback handler
+/// //let handler = handler.next(some_other_handler.into());
+///
+/// // Handle a configuration request
+/// let value = handler.handle_request("some_key");
+/// ```
 pub struct CfgFileHandler {
     /// Underlying file handler used to read content from the specified file.
     file_handler: FileHandler,
 }
 
 impl CfgFileHandler {
+    /// Create a new `CfgFileHandler` for the specified file path.
+    ///
+    /// # Parameters
+    ///
+    /// - `file_path`: A path to the configuration file.
+    ///
+    /// # Returns
+    ///
+    /// A new `CfgFileHandler` instance.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cor_args::CfgFileHandler;
+    ///
+    /// let handler = CfgFileHandler::new("config.toml");
+    /// ```
     #[allow(dead_code)]
     pub fn new<P>(file_path: P) -> Self
     where
@@ -401,6 +570,19 @@ impl CfgFileHandler {
 }
 
 impl Handler for CfgFileHandler {
+    /// Handle a configuration request and return the value associated with the provided key.
+    ///
+    /// This method attempts to read the configuration file and retrieve the value associated
+    /// with the given key. If the key is not found, it may delegate the request to a fallback
+    /// handler if one is defined.
+    ///
+    /// # Parameters
+    ///
+    /// - `key`: A string representing the configuration key to retrieve.
+    ///
+    /// # Returns
+    ///
+    /// An `Option` containing the value associated with the key, or `None` if the key is not found.
     fn handle_request(&self, key: &str) -> Option<String> {
         if let Ok(cfg) = Config::builder()
             .add_source(config::File::with_name(
