@@ -1,12 +1,14 @@
-use clap::ArgMatches;
-use config::Config;
 use serde_json::Value;
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::env;
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
+
+#[cfg(feature = "clap")]
+pub use self::internal_clap::*;
+#[cfg(feature = "config")]
+pub use self::internal_config::*;
 
 /// A trait for handling requests based on a key.
 ///
@@ -87,98 +89,103 @@ impl Into<Box<dyn Handler>> for DefaultHandler {
     }
 }
 
-/// A handler for managing command-line arguments.
-///
-/// This struct is responsible for handling command-line arguments passed to the application.
-/// If a value for a given key is not found in the arguments, it delegates the request to the
-/// next handler (if provided).
-///
-/// # Examples
-///
-/// ```
-/// use cor_args::{ArgHandler, Handler};
-///
-/// // Create a simple `clap` command
-/// let args = clap::Command::new("myapp")
-///     .arg(clap::Arg::new("example").long("example"))
-///     .get_matches();
-///
-/// // Create a new ArgHandler for a `clap::ArgMatches`
-/// let handler = ArgHandler::new(&args);
-///
-/// // Add a fallback handler
-/// //let handler = handler.next(some_other_handler.into());
-///
-/// // Handle a configuration request matching the `clap::Arg` name
-/// let value = handler.handle_request("example");
-/// ```
-pub struct ArgHandler<'a> {
-    /// Parsed command-line arguments.
-    args: &'a ArgMatches,
-    /// An optional next handler to delegate requests if this handler can't fulfill them.
-    next: Option<Box<dyn Handler>>,
-}
-
-impl<'a> ArgHandler<'a> {
-    /// Creates a new `ArgHandler` with the specified arguments.
+#[cfg(feature = "clap")]
+pub mod internal_clap {
+    use super::*;
+    use clap::ArgMatches;
+    /// A handler for managing command-line arguments.
     ///
-    /// # Arguments
-    ///
-    /// * `args` - The parsed command-line arguments.
+    /// This struct is responsible for handling command-line arguments passed to the application.
+    /// If a value for a given key is not found in the arguments, it delegates the request to the
+    /// next handler (if provided).
     ///
     /// # Examples
     ///
     /// ```
-    /// use cor_args::ArgHandler;
+    /// use cor_args::{ArgHandler, Handler};
     ///
+    /// // Create a simple `clap` command
     /// let args = clap::Command::new("myapp")
-    ///     .arg(clap::Arg::new("config").long("some-option"))
+    ///     .arg(clap::Arg::new("example").long("example"))
     ///     .get_matches();
     ///
+    /// // Create a new ArgHandler for a `clap::ArgMatches`
     /// let handler = ArgHandler::new(&args);
+    ///
+    /// // Add a fallback handler
+    /// //let handler = handler.next(some_other_handler.into());
+    ///
+    /// // Handle a configuration request matching the `clap::Arg` name
+    /// let value = handler.handle_request("example");
     /// ```
-    #[allow(dead_code)]
-    pub fn new(args: &'a ArgMatches) -> Self {
-        ArgHandler { args, next: None }
+    pub struct ArgHandler<'a> {
+        /// Parsed command-line arguments.
+        args: &'a ArgMatches,
+        /// An optional next handler to delegate requests if this handler can't fulfill them.
+        next: Option<Box<dyn Handler>>,
     }
 
-    #[allow(dead_code)]
-    pub fn next(mut self, handler: Box<dyn Handler>) -> Self {
-        self.next = Some(handler);
-        self
-    }
-}
+    impl<'a> ArgHandler<'a> {
+        /// Creates a new `ArgHandler` with the specified arguments.
+        ///
+        /// # Arguments
+        ///
+        /// * `args` - The parsed command-line arguments.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use cor_args::ArgHandler;
+        ///
+        /// let args = clap::Command::new("myapp")
+        ///     .arg(clap::Arg::new("config").long("some-option"))
+        ///     .get_matches();
+        ///
+        /// let handler = ArgHandler::new(&args);
+        /// ```
+        #[allow(dead_code)]
+        pub fn new(args: &'a ArgMatches) -> Self {
+            ArgHandler { args, next: None }
+        }
 
-impl<'a> Handler for ArgHandler<'a> {
-    /// Retrieves a value for the specified key from the command-line arguments.
-    ///
-    /// If the key is not found in the arguments, and if a next handler is provided, it delegates the request
-    /// to the next handler. If there's no next handler or if the key is not found in both the arguments and
-    /// the next handler, it returns `None`.
-    ///
-    /// # Arguments
-    ///
-    /// * `key` - The key for which the value needs to be retrieved.
-    ///
-    /// # Returns
-    ///
-    /// An `Option` containing the value associated with the key, or `None` if the key is not found.
-    fn handle_request(&self, key: &str) -> Option<String> {
-        if let Ok(value) = self.args.try_get_one::<String>(key) {
-            if let Some(value) = value {
-                return Some(value.clone());
+        #[allow(dead_code)]
+        pub fn next(mut self, handler: Box<dyn Handler>) -> Self {
+            self.next = Some(handler);
+            self
+        }
+    }
+
+    impl<'a> Handler for ArgHandler<'a> {
+        /// Retrieves a value for the specified key from the command-line arguments.
+        ///
+        /// If the key is not found in the arguments, and if a next handler is provided, it delegates the request
+        /// to the next handler. If there's no next handler or if the key is not found in both the arguments and
+        /// the next handler, it returns `None`.
+        ///
+        /// # Arguments
+        ///
+        /// * `key` - The key for which the value needs to be retrieved.
+        ///
+        /// # Returns
+        ///
+        /// An `Option` containing the value associated with the key, or `None` if the key is not found.
+        fn handle_request(&self, key: &str) -> Option<String> {
+            if let Ok(value) = self.args.try_get_one::<String>(key) {
+                if let Some(value) = value {
+                    return Some(value.clone());
+                }
             }
+            if let Some(next_handler) = &self.next {
+                return next_handler.handle_request(key);
+            }
+            None
         }
-        if let Some(next_handler) = &self.next {
-            return next_handler.handle_request(key);
-        }
-        None
     }
-}
 
-impl<'a> Into<Box<dyn Handler + 'a>> for ArgHandler<'a> {
-    fn into(self) -> Box<dyn Handler + 'a> {
-        Box::new(self)
+    impl<'a> Into<Box<dyn Handler + 'a>> for ArgHandler<'a> {
+        fn into(self) -> Box<dyn Handler + 'a> {
+            Box::new(self)
+        }
     }
 }
 
@@ -510,102 +517,164 @@ impl Into<Box<dyn Handler>> for JSONFileHandler {
     }
 }
 
-/// A configuration file handler for reading key-value pairs from a file.
-///
-/// The `CfgFileHandler` is used to read configuration data from a file and provide it
-/// as key-value pairs. It supports chaining multiple handlers for fallback behavior.
-///
-/// # Examples
-///
-/// ```
-/// use cor_args::{CfgFileHandler, Handler};
-///
-/// // Create a new CfgFileHandler for a specific file path
-/// let handler = CfgFileHandler::new("config.toml");
-///
-/// // Add a fallback handler
-/// //let handler = handler.next(some_other_handler.into());
-///
-/// // Handle a configuration request
-/// let value = handler.handle_request("some_key");
-/// ```
-pub struct CfgFileHandler {
-    /// Underlying file handler used to read content from the specified file.
-    file_handler: FileHandler,
-}
-
-impl CfgFileHandler {
-    /// Create a new `CfgFileHandler` for the specified file path.
+#[cfg(feature = "config")]
+pub mod internal_config {
+    use super::*;
+    use config::Config;
+    /// A configuration file handler for reading key-value pairs from a file.
     ///
-    /// # Parameters
-    ///
-    /// - `file_path`: A path to the configuration file.
-    ///
-    /// # Returns
-    ///
-    /// A new `CfgFileHandler` instance.
+    /// The `ConfigHandler` is used to read configuration data from a file and provide it
+    /// as key-value pairs. It supports chaining multiple handlers for fallback behavior.
     ///
     /// # Examples
     ///
     /// ```
-    /// use cor_args::CfgFileHandler;
+    /// use cor_args::{ConfigHandler, Handler};
     ///
-    /// let handler = CfgFileHandler::new("config.toml");
+    /// // Example YAML file
+    /// // ---
+    /// // test_obj:
+    /// //     some_key: "test_val"
+    ///
+    /// let config = config::Config::builder().build().unwrap();
+    /// //    .add_source(config::File::new("/path/to/file",
+    /// //        config::FileFormat::Yaml,
+    /// //    ))
+    /// //    .build()
+    /// //    .unwrap();
+    ///
+    /// // Create a new ConfigHandler for a specific config::Config instance
+    /// let handler = ConfigHandler::new(Box::new(config));
+    ///
+    /// // Add a fallback handler
+    /// //let handler = handler.next(some_other_handler.into());
+    ///
+    /// // Handle a configuration request
+    /// let value = handler.handle_request("some_key");
     /// ```
-    #[allow(dead_code)]
-    pub fn new<P>(file_path: P) -> Self
-    where
-        P: Into<PathBuf>,
-    {
-        CfgFileHandler {
-            file_handler: FileHandler::new(file_path),
+    pub struct ConfigHandler {
+        /// The Config instance ultimately being queried.
+        config: Box<config::Config>,
+        next: Option<Box<dyn Handler>>,
+    }
+
+    impl ConfigHandler {
+        /// Create a new `ConfigHandler` for the specified file path.
+        ///
+        /// # Parameters
+        ///
+        /// - `config`: A `config::Config` reference.
+        ///
+        /// # Returns
+        ///
+        /// A new `ConfigHandler` instance.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use cor_args::ConfigHandler;
+        ///
+        /// let handler = ConfigHandler::new(Box::new(config::Config::builder().build().unwrap()));
+        /// ```
+        #[allow(dead_code)]
+        pub fn new(config: Box<Config>) -> Self {
+            ConfigHandler { config, next: None }
+        }
+
+        #[allow(dead_code)]
+        pub fn next(mut self, handler: Box<dyn Handler>) -> Self {
+            self.next = Some(handler);
+            self
+        }
+
+        /// Recursively searches for a key within the parsed Config structure.
+        ///
+        /// # Arguments
+        ///
+        /// * `config_value` - The current Config value being inspected.
+        /// * `key` - The key for which the value needs to be retrieved.
+        ///
+        /// # Returns
+        ///
+        /// If found, returns an `Option` wrapping a `String` value associated with the key.
+        /// Otherwise, returns `None`.
+        pub fn find_key_recursive(config_value: &config::Value, key: &str) -> Option<String> {
+            match &config_value.kind {
+                config::ValueKind::Table(map) => {
+                    if let Some(value) = map.get(key) {
+                        match &value.kind {
+                            config::ValueKind::String(value) => {
+                                return Some(value.as_str().to_string())
+                            }
+                            _ => return Some(value.to_string()),
+                        }
+                    }
+                    for (_, value) in map.iter() {
+                        if let Some(found) = Self::find_key_recursive(value, key) {
+                            return Some(found);
+                        }
+                    }
+                }
+                config::ValueKind::Array(arr) => {
+                    for value in arr.iter() {
+                        if let Some(found) = Self::find_key_recursive(value, key) {
+                            return Some(found);
+                        }
+                    }
+                }
+                _ => {}
+            }
+            None
         }
     }
 
-    #[allow(dead_code)]
-    pub fn next(mut self, handler: Box<dyn Handler>) -> Self {
-        self.file_handler.next = Some(handler);
-        self
-    }
-}
-
-impl Handler for CfgFileHandler {
-    /// Handle a configuration request and return the value associated with the provided key.
-    ///
-    /// This method attempts to read the configuration file and retrieve the value associated
-    /// with the given key. If the key is not found, it may delegate the request to a fallback
-    /// handler if one is defined.
-    ///
-    /// # Parameters
-    ///
-    /// - `key`: A string representing the configuration key to retrieve.
-    ///
-    /// # Returns
-    ///
-    /// An `Option` containing the value associated with the key, or `None` if the key is not found.
-    fn handle_request(&self, key: &str) -> Option<String> {
-        if let Ok(cfg) = Config::builder()
-            .add_source(config::File::with_name(
-                self.file_handler.file_path.display().to_string().as_str(),
-            ))
-            .build()
-        {
-            if let Ok(cfg) = cfg.try_deserialize::<HashMap<String, String>>() {
-                if let Some(value) = cfg.get(key) {
-                    return Some(value.clone());
+    impl Handler for ConfigHandler {
+        /// Handle a configuration request and return the value associated with the provided key.
+        ///
+        /// This method attempts to read the configuration file and retrieve the value associated
+        /// with the given key. If the key is not found, it may delegate the request to a fallback
+        /// handler if one is defined.
+        ///
+        /// # Parameters
+        ///
+        /// - `key`: A string representing the configuration key to retrieve.
+        ///
+        /// # Returns
+        ///
+        /// An `Option` containing the value associated with the key, or `None` if the key is not found.
+        fn handle_request(&self, key: &str) -> Option<String> {
+            if let Ok(parsed_config) = self.config.clone().try_deserialize::<config::Value>() {
+                if let Some(value) = Self::find_key_recursive(&parsed_config, key) {
+                    return Some(value);
                 }
             }
+            if let Some(next_handler) = &self.next {
+                return next_handler.handle_request(key);
+            }
+            None
         }
-        if let Some(next_handler) = &self.file_handler.next {
-            return next_handler.handle_request(key);
-        }
-        None
     }
-}
 
-impl Into<Box<dyn Handler>> for CfgFileHandler {
-    fn into(self) -> Box<dyn Handler> {
-        Box::new(self)
+    impl Into<Box<dyn Handler>> for ConfigHandler {
+        fn into(self) -> Box<dyn Handler> {
+            Box::new(self)
+        }
+    }
+
+    impl From<Result<config::Config, config::ConfigError>> for ConfigHandler {
+        fn from(value: Result<config::Config, config::ConfigError>) -> Self {
+            if let Ok(config) = value {
+                ConfigHandler::new(Box::new(config))
+            } else {
+                panic!("Failed to convert into a Config")
+            }
+        }
+    }
+
+    impl From<config::Config> for ConfigHandler {
+        fn from(value: config::Config) -> Self {
+            ConfigHandler::new(Box::new(value))
+        }
     }
 }
 
@@ -616,8 +685,9 @@ mod tests {
 
     use super::*;
 
+    #[cfg(feature = "clap")]
     #[test]
-    fn test_all_chain_of_responsibility() {
+    fn test_clap_features_chain_of_responsibility() {
         env::set_var("TEST_KEY", "EnvHandler");
         let args = clap::Command::new("test_app")
             .arg(clap::Arg::new("example").long("example"))
@@ -639,6 +709,52 @@ mod tests {
         ));
         let actual = handler.handle_request("");
         assert_eq!(actual, Some("DefaultHandler".to_string()));
+    }
+
+    #[test]
+    fn test_default_features_chain_of_responsibility() {
+        env::set_var("TEST_KEY", "EnvHandler");
+        let temp_dir = tempfile::tempdir().unwrap();
+        // Don't create the temporary file so the chain keeps going to the end for this test.
+        let raw_file = temp_dir.path().join("should-not-exist.txt");
+        let mut json_file = NamedTempFile::new().unwrap();
+        writeln!(json_file, r#"{{"test_key": "JSONFileHandler"}}"#).unwrap();
+
+        let handler = EnvHandler::new().next(Box::new(
+            FileHandler::new(raw_file.as_path().to_str().unwrap())
+                .next(Box::new(JSONFileHandler::new(
+                    json_file.path().to_str().unwrap(),
+                )))
+                .next(Box::new(DefaultHandler::new("DefaultHandler"))),
+        ));
+        let actual = handler.handle_request("");
+        assert_eq!(actual, Some("DefaultHandler".to_string()));
+    }
+
+    #[cfg(feature = "config")]
+    #[test]
+    fn test_config_features_chain_of_responsibility() {
+        env::set_var("UNUSED", "EnvHandler");
+        let mut temp_file = tempfile::Builder::new().suffix(".yml").tempfile().unwrap();
+        let expected = r#"
+        ---
+        test_obj:
+            test_key: "test_val"
+        "#;
+        writeln!(temp_file, "{}", unindent::unindent(expected)).unwrap();
+
+        let config = config::Config::builder()
+            .add_source(config::File::new(
+                temp_file.path().to_str().unwrap(),
+                config::FileFormat::Yaml,
+            ))
+            .build()
+            .unwrap();
+
+        let handler = EnvHandler::new().next(Box::new(ConfigHandler::new(Box::new(config))));
+        // let handler = EnvHandler::new().next(Box::<ConfigHandler>::new(config.into()));
+        let actual = handler.handle_request("test_key");
+        assert_eq!(actual, Some("test_val".to_string()));
     }
 
     mod default_handler {
@@ -689,6 +805,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "clap")]
     mod arg_handler {
         use clap::Arg;
 
@@ -822,7 +939,9 @@ mod tests {
         }
     }
 
-    mod cfg_file_handler {
+    #[cfg(feature = "config")]
+    mod config_handler {
+        use config::Config;
         use std::io::Write;
         use tempfile::Builder;
         use unindent::unindent;
@@ -837,9 +956,16 @@ mod tests {
             test_key: 123
             "#;
             writeln!(temp_file, "{}", unindent(expected)).unwrap();
+            let config = config::Config::builder()
+                .add_source(config::File::new(
+                    temp_file.path().to_str().unwrap(),
+                    config::FileFormat::Yaml,
+                ))
+                .build()
+                .unwrap();
 
-            let handler = CfgFileHandler::new(temp_file.path().to_str().unwrap());
-            let actual = handler.handle_request("test_key"); // key is not used in this handler
+            let handler = ConfigHandler::new(Box::new(config));
+            let actual = handler.handle_request("test_key");
             assert_eq!(actual, Some("123".to_string()));
         }
 
@@ -851,14 +977,20 @@ mod tests {
             test_key: "example"
             "#;
             writeln!(temp_file, "{}", unindent(expected)).unwrap();
+            let config = config::Config::builder()
+                .add_source(config::File::new(
+                    temp_file.path().to_str().unwrap(),
+                    config::FileFormat::Yaml,
+                ))
+                .build()
+                .unwrap();
 
-            let handler = CfgFileHandler::new(temp_file.path().to_str().unwrap());
-            let actual = handler.handle_request("test_key"); // key is not used in this handler
+            let handler = ConfigHandler::new(Box::new(config));
+            let actual = handler.handle_request("test_key");
             assert_eq!(actual, Some("example".to_string()));
         }
 
         #[test]
-        #[ignore]
         fn test_retrieves_set_value_nested_object() {
             let mut temp_file = Builder::new().suffix(".yaml").tempfile().unwrap();
             let expected = r#"
@@ -867,23 +999,24 @@ mod tests {
                 test_key: "test_val"
             "#;
             writeln!(temp_file, "{}", unindent(expected)).unwrap();
+            let config = config::Config::builder()
+                .add_source(config::File::new(
+                    temp_file.path().to_str().unwrap(),
+                    config::FileFormat::Yaml,
+                ))
+                .build()
+                .unwrap();
 
-            let handler = CfgFileHandler::new(temp_file.path().to_str().unwrap());
-            let actual = handler.handle_request("test_key"); // key is not used in this handler
+            let handler = ConfigHandler::new(Box::new(config));
+            let actual = handler.handle_request("test_key");
             assert_eq!(actual, Some("test_val".to_string()));
         }
 
         #[test]
-        fn test_returns_none_for_nonexistent_file() {
-            let handler = CfgFileHandler::new("");
-            let result = handler.handle_request("example");
-            assert_eq!(result, None);
-        }
-
-        #[test]
         fn test_next_handler_called() {
+            let config = Config::default();
             let next_handler = Box::new(DefaultHandler::new("DEFAULT_VALUE"));
-            let handler = CfgFileHandler::new("").next(next_handler);
+            let handler = ConfigHandler::new(Box::new(config)).next(next_handler);
             let actual = handler.handle_request("example");
             assert_eq!(actual, Some("DEFAULT_VALUE".to_string()));
         }
